@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Interactive MLE & Fisher Information Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+window.MathJax = {
+  tex: { inlineMath: [['\\(','\\)'], ['$', '$']], displayMath: [['\\[','\\]'], ['$$','$$']] },
+  svg: { fontCache: 'global' }
+};
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+<style>
+  :root {
+    --bg: #ffffff;
+    --ink: #111;
+    --muted: #555;
+    --line: #ddd;
+    --soft: #f7f7f7;
+    --accent: #111;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.5;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    min-height: 100vh;
+  }
+  aside {
+    border-right: 1px solid var(--line);
+    background: var(--soft);
+    padding: 24px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+  main {
+    padding: 32px;
+    max-width: 1250px;
+  }
+  h1 { margin: 0 0 8px; font-size: 30px; }
+  h2 { margin: 28px 0 12px; font-size: 18px; }
+  p { color: var(--muted); margin-top: 0; }
+  .control {
+    margin: 18px 0;
+  }
+  label {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 14px;
+    color: #222;
+    margin-bottom: 6px;
+  }
+  output {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #000;
+  }
+  input[type="range"] {
+    width: 100%;
+  }
+  .rule {
+    border-top: 1px solid var(--line);
+    margin: 24px 0;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 24px;
+  }
+  .card {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 18px;
+    background: #fff;
+  }
+  .card h3 {
+    margin: 0 0 10px;
+    font-size: 17px;
+  }
+  canvas {
+    width: 100% !important;
+    height: 360px !important;
+  }
+  .math {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    padding: 18px;
+    margin-top: 20px;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-top: 20px;
+  }
+  .stat {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px;
+    background: #fff;
+  }
+  .stat small {
+    display: block;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .stat b {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 16px;
+  }
+  button {
+    border: 1px solid #bbb;
+    border-radius: 6px;
+    background: #fff;
+    padding: 9px 12px;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 12px;
+  }
+  button:hover { background: #f0f0f0; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    aside { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--line); }
+    main { padding: 22px; }
+    .grid { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <h2>Bernoulli Parameters<br><span style="font-weight:400;color:#666">(System Failures)</span></h2>
+    <div class="control">
+      <label>True Probability \(p\) <output id="pBernOut"></output></label>
+      <input id="pBern" type="range" min="0.01" max="0.99" value="0.20" step="0.01">
+    </div>
+    <div class="control">
+      <label>Sample Size \(n\) <output id="nBernOut"></output></label>
+      <input id="nBern" type="range" min="10" max="1000" value="100" step="10">
+    </div>
+
+    <div class="rule"></div>
+
+    <h2>Geometric Parameters<br><span style="font-weight:400;color:#666">(Waiting Time)</span></h2>
+    <div class="control">
+      <label>True Probability \(p\) <output id="pGeomOut"></output></label>
+      <input id="pGeom" type="range" min="0.01" max="0.99" value="0.20" step="0.01">
+    </div>
+    <div class="control">
+      <label>Sample Size \(n\) <output id="nGeomOut"></output></label>
+      <input id="nGeom" type="range" min="10" max="1000" value="100" step="10">
+    </div>
+
+    <button id="resample">Resimulate</button>
+  </aside>
+
+  <main>
+    <h1>Interactive MLE & Fisher Information Dashboard</h1>
+    <p>Adjust the true probabilities and sample sizes to see how Fisher Information shapes likelihood curvature, MLE variability, and confidence intervals.</p>
+
+    <div class="math">
+      <b>Models.</b>
+      \[
+      X_i\sim\mathrm{Bernoulli}(p),\qquad \hat p=\frac{1}{n}\sum_i X_i,\qquad
+      \mathrm{SE}(\hat p)\approx \sqrt{\frac{p(1-p)}{n}}.
+      \]
+      \[
+      X_i\sim\mathrm{Geometric}(p)\ \text{on } \{1,2,\ldots\},\qquad
+      \hat p=\frac{n}{\sum_i X_i}=\frac{1}{\bar X},\qquad
+      \mathrm{SE}(\hat p)\approx p\sqrt{\frac{1-p}{n}}.
+      \]
+    </div>
+
+    <div class="stats">
+      <div class="stat"><small>Bernoulli single-study MLE</small><b id="bernMleStat"></b></div>
+      <div class="stat"><small>Bernoulli theoretical SE</small><b id="bernSeStat"></b></div>
+      <div class="stat"><small>Geometric single-study MLE</small><b id="geomMleStat"></b></div>
+      <div class="stat"><small>Geometric theoretical SE</small><b id="geomSeStat"></b></div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h3 id="bernLikeTitle">Bernoulli Likelihood</h3>
+        <canvas id="bernLike"></canvas>
+      </div>
+      <div class="card">
+        <h3>Bernoulli Sampling Distribution</h3>
+        <canvas id="bernSample"></canvas>
+      </div>
+      <div class="card">
+        <h3 id="geomLikeTitle">Geometric Likelihood</h3>
+        <canvas id="geomLike"></canvas>
+      </div>
+      <div class="card">
+        <h3>Geometric Sampling Distribution</h3>
+        <canvas id="geomSample"></canvas>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+let charts = {};
+let seedState = 123456789;
+
+function rand() {
+  seedState = (1664525 * seedState + 1013904223) >>> 0;
+  return seedState / 4294967296;
+}
+
+function randNormal() {
+  let u = 0, v = 0;
+  while (u === 0) u = rand();
+  while (v === 0) v = rand();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+function normalPdf(x, mu, sd) {
+  return Math.exp(-0.5 * ((x - mu) / sd) ** 2) / (sd * Math.sqrt(2 * Math.PI));
+}
+
+function geometric(p) {
+  return Math.ceil(Math.log(1 - rand()) / Math.log(1 - p));
+}
+
+function linspace(a, b, n) {
+  const arr = [];
+  const step = (b - a) / (n - 1);
+  for (let i = 0; i < n; i++) arr.push(a + i * step);
+  return arr;
+}
+
+function histogram(values, bins=30) {
+  const minVal = Math.min(...values);
+  const maxVal = Math.max(...values);
+  const pad = Math.max(1e-6, (maxVal - minVal) * 0.05);
+  const lo = minVal - pad;
+  const hi = maxVal + pad;
+  const width = (hi - lo) / bins;
+  const counts = new Array(bins).fill(0);
+  values.forEach(v => {
+    let idx = Math.floor((v - lo) / width);
+    if (idx < 0) idx = 0;
+    if (idx >= bins) idx = bins - 1;
+    counts[idx]++;
+  });
+  const density = counts.map(c => c / (values.length * width));
+  const centers = counts.map((_, i) => lo + (i + 0.5) * width);
+  return { centers, density, lo, hi };
+}
+
+function makeChart(id, config) {
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(document.getElementById(id), config);
+}
+
+function likelihoodChart(id, pDomain, likelihood, mle, se) {
+  const maxL = Math.max(...likelihood);
+  const normL = likelihood.map(y => y / maxL);
+  const ciLow = Math.max(0.01, mle - 1.96 * se);
+  const ciHigh = Math.min(0.99, mle + 1.96 * se);
+
+  makeChart(id, {
+    type: 'line',
+    data: {
+      labels: pDomain.map(x => x.toFixed(3)),
+      datasets: [
+        {
+          label: 'Likelihood L(p), normalized',
+          data: normL,
+          borderWidth: 2,
+          pointRadius: 0,
+          borderColor: 'black'
+        },
+        {
+          label: `MLE = ${mle.toFixed(3)}`,
+          data: pDomain.map(x => Math.abs(x - mle) < 0.003 ? 1 : null),
+          borderWidth: 2,
+          pointRadius: 0,
+          borderColor: 'red',
+          spanGaps: false
+        },
+        {
+          label: `95% CI [${ciLow.toFixed(3)}, ${ciHigh.toFixed(3)}]`,
+          data: pDomain.map((x, i) => (x >= ciLow && x <= ciHigh) ? normL[i] : null),
+          borderWidth: 0,
+          pointRadius: 0,
+          backgroundColor: 'rgba(255,0,0,0.18)',
+          fill: true
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'nearest', intersect: false },
+      scales: {
+        x: { title: { display: true, text: 'Parameter p' }, ticks: { maxTicksLimit: 8 } },
+        y: { title: { display: true, text: 'Normalized Likelihood' }, min: 0 }
+      }
+    }
+  });
+}
+
+function samplingChart(id, mles, trueP, theoreticalSe) {
+  const hist = histogram(mles, 30);
+  const xs = hist.centers;
+  const pdf = xs.map(x => normalPdf(x, trueP, theoreticalSe));
+
+  makeChart(id, {
+    type: 'bar',
+    data: {
+      labels: xs.map(x => x.toFixed(3)),
+      datasets: [
+        {
+          type: 'bar',
+          label: 'Simulated MLEs',
+          data: hist.density,
+          backgroundColor: 'rgba(70,130,180,0.6)',
+          borderColor: 'black',
+          borderWidth: 0.5
+        },
+        {
+          type: 'line',
+          label: `Theory (SE=${theoreticalSe.toFixed(3)})`,
+          data: pdf,
+          borderColor: 'darkorange',
+          borderWidth: 2,
+          pointRadius: 0
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { title: { display: true, text: 'Estimated MLE' }, ticks: { maxTicksLimit: 8 } },
+        y: { title: { display: true, text: 'Density' }, min: 0 }
+      }
+    }
+  });
+}
+
+function update() {
+  const pBern = parseFloat(document.getElementById('pBern').value);
+  const nBern = parseInt(document.getElementById('nBern').value);
+  const pGeom = parseFloat(document.getElementById('pGeom').value);
+  const nGeom = parseInt(document.getElementById('nGeom').value);
+
+  document.getElementById('pBernOut').textContent = pBern.toFixed(2);
+  document.getElementById('nBernOut').textContent = nBern;
+  document.getElementById('pGeomOut').textContent = pGeom.toFixed(2);
+  document.getElementById('nGeomOut').textContent = nGeom;
+
+  const nSim = 1000;
+  const pDomain = linspace(0.01, 0.99, 500);
+
+  const bernMles = [];
+  let firstK = 0;
+  for (let s = 0; s < nSim; s++) {
+    let k = 0;
+    for (let i = 0; i < nBern; i++) if (rand() < pBern) k++;
+    if (s === 0) firstK = k;
+    bernMles.push(k / nBern);
+  }
+  const singleBernMle = firstK / nBern;
+  const bernLikelihood = pDomain.map(p => Math.exp(firstK * Math.log(p) + (nBern - firstK) * Math.log(1 - p)));
+  const bernSeEstimated = Math.sqrt(Math.max(singleBernMle * (1 - singleBernMle), 1e-10) / nBern);
+  const bernSeTheoretical = Math.sqrt(pBern * (1 - pBern) / nBern);
+
+  const geomMles = [];
+  let firstSum = 0;
+  for (let s = 0; s < nSim; s++) {
+    let sum = 0;
+    for (let i = 0; i < nGeom; i++) sum += geometric(pGeom);
+    if (s === 0) firstSum = sum;
+    geomMles.push(nGeom / sum);
+  }
+  const singleGeomMle = nGeom / firstSum;
+  const geomLikelihood = pDomain.map(p => Math.exp(nGeom * Math.log(p) + (firstSum - nGeom) * Math.log(1 - p)));
+  const geomSeEstimated = singleGeomMle * Math.sqrt(Math.max(1 - singleGeomMle, 1e-10) / nGeom);
+  const geomSeTheoretical = pGeom * Math.sqrt((1 - pGeom) / nGeom);
+
+  document.getElementById('bernLikeTitle').textContent = `Bernoulli Likelihood (n=${nBern}, k=${firstK})`;
+  document.getElementById('geomLikeTitle').textContent = `Geometric Likelihood (n=${nGeom}, sum(x)=${firstSum})`;
+  document.getElementById('bernMleStat').textContent = singleBernMle.toFixed(4);
+  document.getElementById('bernSeStat').textContent = bernSeTheoretical.toFixed(4);
+  document.getElementById('geomMleStat').textContent = singleGeomMle.toFixed(4);
+  document.getElementById('geomSeStat').textContent = geomSeTheoretical.toFixed(4);
+
+  likelihoodChart('bernLike', pDomain, bernLikelihood, singleBernMle, bernSeEstimated);
+  samplingChart('bernSample', bernMles, pBern, bernSeTheoretical);
+  likelihoodChart('geomLike', pDomain, geomLikelihood, singleGeomMle, geomSeEstimated);
+  samplingChart('geomSample', geomMles, pGeom, geomSeTheoretical);
+}
+
+['pBern','nBern','pGeom','nGeom'].forEach(id => {
+  document.getElementById(id).addEventListener('input', update);
+});
+document.getElementById('resample').addEventListener('click', () => {
+  seedState = (Date.now() >>> 0);
+  update();
+});
+
+update();
+</script>
+</body>
+</html>
